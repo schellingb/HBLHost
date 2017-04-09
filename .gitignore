@@ -1,0 +1,12 @@
+*.sdf
+*.opensdf
+*.user
+*.suo
+*.aps
+*.ipch
+*-i686
+*-x86_64
+Debug/
+Release-*/
+.vs/
+work/
