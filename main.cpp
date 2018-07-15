@@ -26,14 +26,14 @@
 static sts_net_interfaceinfo_t g_AddressTable[20];
 static int g_AddressCount;
 static int g_Port = 5000;
-static const char s_ResponseTEXT[] = "HTTP/1.1 200 OK" "\r\n" "\r\n" "HELLO WORLD";
+static const char s_ResponseTEXTHead[] = "HTTP/1.1 200 OK" "\r\n" "\r\n" "HELLO WORLD";
 #ifndef HBLHOST_TEXTRESPONSEONLY
-static const char s_ResponseMP4[] = "HTTP/1.1 200 OK" "\r\n" "Content-Type: video/mp4" "\r\n" "\r\n";
+static const char s_ResponseMP4Head[] = "HTTP/1.1 200 OK" "\r\n" "Content-Type: video/mp4" "\r\n" "\r\n";
 static const char s_ResponseREDIRECT[] = "HTTP/1.1 303 Moved Permanently" "\r\n" "Location: /MP4" "\r\n" "\r\n";
+static unsigned char s_ResponseMP4Full[sizeof(s_ResponseMP4Head)-sizeof('\0') + 41224];
 static bool g_ServeTEXT;
 static char* g_MP4ExecuteELF;
-static unsigned char mp4[41224];
-static void inflate_mp4();
+static void inflate_mp4(unsigned char* buf, size_t size);
 #endif
 
 #ifdef HBLHOST_USE_WIN32SYSTRAY
@@ -150,13 +150,17 @@ static void LogFile(FILE* f, const char *format, ...)
 
 static void ShowHelp()
 {
+	#ifndef HBLHOST_TEXTRESPONSEONLY
+	#define ELFEXPLAIN "-e <elf-path>     Override the default elf executable path" "\n\n"
+	#else
+	#define ELFEXPLAIN
+	#endif
 	LogError("HBLHost - Command Line Arguments" "\n\n"
 		"-b <ip-address>   Specify the ip address of which interface to listen on (defaults to all interfaces)" "\n\n"
 		"-p <port-num>     Specify the port number on which to serve web requests (defaults to 5000)" "\n\n"
-		#ifndef HBLHOST_TEXTRESPONSEONLY
-		"-e <elf-path>     Override the default elf executable path" "\n\n"
-		#endif
+		ELFEXPLAIN
 		"-h                Show this help");
+	#undef ELFEXPLAIN
 }
 
 int main(int argc, char *argv[])
@@ -172,8 +176,9 @@ int main(int argc, char *argv[])
 	}
 
 	#ifndef HBLHOST_TEXTRESPONSEONLY
-	g_MP4ExecuteELF = (char*)&mp4[14678 + 15]; //551
-	inflate_mp4();
+	memcpy(s_ResponseMP4Full, s_ResponseMP4Head, sizeof(s_ResponseMP4Head)-sizeof('\0'));
+	inflate_mp4(&s_ResponseMP4Full[sizeof(s_ResponseMP4Head)-sizeof('\0')], sizeof(s_ResponseMP4Full) - (sizeof(s_ResponseMP4Head)-sizeof('\0')));
+	g_MP4ExecuteELF = (char*)&s_ResponseMP4Full[sizeof(s_ResponseMP4Head)-sizeof('\0') + 14678 + 15];
 	if (CustomExecuteELF && CustomExecuteELF[0])
 	{
 		int lenCustom = (int)strlen(CustomExecuteELF), lenMax = (int)strlen(g_MP4ExecuteELF);
@@ -244,7 +249,7 @@ int main(int argc, char *argv[])
 		#endif
 		{
 			LogText("    Serving plain text response");
-			sts_net_send(&client, s_ResponseTEXT, sizeof(s_ResponseTEXT) - 1);
+			sts_net_send(&client, s_ResponseTEXTHead, sizeof(s_ResponseTEXTHead) - 1);
 		}
 		#ifndef HBLHOST_TEXTRESPONSEONLY
 		else if (!strstr(Request, "/MP4"))
@@ -255,13 +260,14 @@ int main(int argc, char *argv[])
 		else if (!strstr(Request, "Accept: */*"))
 		{
 			LogText("    Initial request from outside video player, sending only header");
-			sts_net_send(&client, s_ResponseMP4, sizeof(s_ResponseMP4) - 1);
+			sts_net_send(&client, s_ResponseMP4Head, sizeof(s_ResponseMP4Head) - sizeof('\0'));
+			Sleep(3000); //sleep 3000 ms before closing connection (important for exploit)
 		}
 		else
 		{
 			LogText("    Actual video request from the video player, serving mp4");
-			sts_net_send(&client, s_ResponseMP4, sizeof(s_ResponseMP4) - 1);
-			sts_net_send(&client, mp4, sizeof(mp4));
+			Sleep(1000); //sleep 1000 ms before sending data (important for exploit)
+			sts_net_send(&client, s_ResponseMP4Full, sizeof(s_ResponseMP4Full));
 		}
 		#endif //HBLHOST_TEXTRESPONSEONLY
 
@@ -388,9 +394,9 @@ static const unsigned int mp4_deflated[] = {
 	0xFFFF0FFF, 0xFFFF0F, 0xFFFFF0F, 0xFF0FFFFF, 0xFFFF0FFF, 0xFFFFF0F, 0xFF0FFFFF, 0xFFFF0FFF, 0xFDFF0F00
 };
 
-static void inflate_mp4()
+static void inflate_mp4(unsigned char* buf, size_t size)
 {
-	rle_inflate((const unsigned char*)mp4_deflated, mp4, sizeof(mp4));
+	rle_inflate((const unsigned char*)mp4_deflated, buf, size);
 }
 #endif
 
